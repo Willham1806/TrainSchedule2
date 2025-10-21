@@ -1,0 +1,150 @@
+import streamlit as st
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from Code.Database import list_presets, load_preset, save_preset, delete_preset, save_schedule
+
+LOCAL = ZoneInfo("Europe/London")
+
+
+def parse_time_local(time_str):
+    now = datetime.now(LOCAL)
+    return datetime.strptime(time_str, "%H:%M").replace(
+        year=now.year, month=now.month, day=now.day, tzinfo=LOCAL
+    )
+
+
+def format_24_to_12(time_str):
+    """Convert 'HH:MM' (24h) string to 12-hour format with AM/PM."""
+    try:
+        # Unix-style (Linux, Mac)
+        return datetime.strptime(time_str, "%H:%M").strftime("%-I:%M %p")
+    except ValueError:
+        # Windows fallback (no %-I)
+        return datetime.strptime(time_str, "%H:%M").strftime("%#I:%M %p")
+
+
+def preset_schedule_page():
+    st.title("📆 Train Schedule Presets")
+
+    # Initialise schedule in session state
+    if "schedule" not in st.session_state:
+        st.session_state.schedule = []
+
+    schedule = st.session_state.schedule
+
+    # === Load Existing Schedule Presets ===
+    st.subheader("📁 Load Existing Schedule Presets")
+    presets = list_presets()
+
+    if presets:
+        for preset in presets:
+            cols = st.columns([4, 1, 1])
+            with cols[0]:
+                st.write(preset)
+            with cols[1]:
+                if st.button("Load", key=f"load_{preset}"):
+                    new_schedule = load_preset(preset)
+                    if new_schedule is None:
+                        st.error(f"Preset '{preset}' not found in DB.")
+                    else:
+                        save_schedule(new_schedule)
+                        st.session_state.schedule = new_schedule
+                        for key in ["confirm_c45", "feedback"]:
+                            st.session_state.pop(key, None)
+                        st.success(f"Preset '{preset}' loaded and applied.")
+                        st.rerun()
+            with cols[2]:
+                if st.button("Delete", key=f"delete_{preset}"):
+                    if delete_preset(preset):
+                        st.success(f"Preset '{preset}' deleted.")
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to delete preset '{preset}'.")
+    else:
+        st.info("No presets saved yet.")
+
+    st.markdown("---")
+
+    # === Save Current Schedule as New Preset ===
+    st.subheader("💾 Save Current Schedule as New Preset")
+    preset_name = st.text_input("Enter a name for the new preset", key="preset_name")
+
+    if st.button("Save Current Schedule"):
+        if schedule:
+            if preset_name.strip():
+                save_preset(preset_name.strip(), schedule)
+                st.success(f"Preset '{preset_name.strip()}' saved.")
+                st.rerun()
+            else:
+                st.error("Please enter a valid preset name.")
+        else:
+            st.error("No schedule to save.")
+
+    st.markdown("---")
+
+    # === Display Current Schedule ===
+    st.subheader("🛤️ Current Schedule")
+
+    if schedule:
+        for i, train in enumerate(schedule):
+            dep_time_12h = format_24_to_12(train['departure_time'])
+            cols = st.columns([6, 1])
+            with cols[0]:
+                st.write(f"Train {i + 1} - Departure at {dep_time_12h}")
+            with cols[1]:
+                if st.button("🗑️ Remove", key=f"remove_{i}"):
+                    schedule.pop(i)
+                    st.session_state.schedule = schedule
+                    st.rerun()
+    else:
+        st.info("No trains in the current schedule.")
+
+    st.markdown("---")
+
+        # === Add New Train ===
+    st.subheader("➕ Add New Train")
+
+    with st.form("add_train_form"):
+        new_time_input = st.time_input("Select departure time", step=timedelta(minutes=5))
+        submitted = st.form_submit_button("Add Train")
+
+        if submitted:
+            formatted_time = new_time_input.strftime("%H:%M")
+            time_exists = any(train["departure_time"] == formatted_time for train in schedule)
+
+            if time_exists:
+                st.warning(f"A train already departs at {format_24_to_12(formatted_time)}. Please choose a different time.")
+            else:
+                default_carriages = {
+                    "1": 2, "2": 4, "3": 4, "4": 2,
+                    "5": 2, "6": 4, "7": 4, "8": 2,
+                }
+                new_train = {
+                    "departure_time": formatted_time,
+                    "cancelled": False,
+                    "party_train": False,
+                    "school_name": "",
+                    "carriages": [
+                        {
+                            "number": c_num,
+                            "capacity": cap,
+                            "occupied": False,
+                            "group_size": 0,
+                            "toddlers": 0,
+                            "wheelchair": False,
+                            "group_id": 0,
+                        }
+                        for c_num, cap in default_carriages.items()
+                    ],
+                }
+                schedule.append(new_train)
+                st.session_state.schedule = schedule
+                st.success(f"Added train at {format_24_to_12(formatted_time)}")
+                st.rerun()
+
+    # Final save of schedule
+    st.session_state.schedule = schedule
+
+
+if __name__ == "__main__":
+    preset_schedule_page()
