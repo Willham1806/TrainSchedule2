@@ -28,18 +28,38 @@ def save_schedule(schedule):
 
 # --- Presets ---
 def create_presets_table():
-    pass  # No schema needed
+    pass
 
-def load_presets():
+def list_presets():
     db = get_db()
     doc = db.collection("presets").document("all").get()
     if doc.exists:
-        return doc.to_dict().get("presets", {})
-    return {}
+        return list(doc.to_dict().get("presets", {}).keys())
+    return []
 
-def save_presets(presets):
+def load_preset(name):
     db = get_db()
-    db.collection("presets").document("all").set({"presets": presets})
+    doc = db.collection("presets").document("all").get()
+    if doc.exists:
+        return doc.to_dict().get("presets", {}).get(name)
+    return None
+
+def save_preset(name, data):
+    db = get_db()
+    doc_ref = db.collection("presets").document("all")
+    doc = doc_ref.get()
+    presets = doc.to_dict().get("presets", {}) if doc.exists else {}
+    presets[name] = data
+    doc_ref.set({"presets": presets})
+
+def delete_preset(name):
+    db = get_db()
+    doc_ref = db.collection("presets").document("all")
+    doc = doc_ref.get()
+    if doc.exists:
+        presets = doc.to_dict().get("presets", {})
+        presets.pop(name, None)
+        doc_ref.set({"presets": presets})
 
 # --- Notes ---
 def create_notes_table():
