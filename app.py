@@ -9,38 +9,7 @@ from Party import party_train_page
 from Presets import preset_schedule_page
 from School import school_train_page
 from Information import information_page
-
-import psycopg2
-import os
-
-# --- Supabase Setup ---
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-
-conn = psycopg2.connect(SUPABASE_URL)
-cursor = conn.cursor()
-
-DIGGERS_ID = "today"  # You can adjust this to use a date key if needed
-
-
-def load_diggers_count():
-    cursor.execute("SELECT count FROM diggers_count WHERE id = %s;", (DIGGERS_ID,))
-    row = cursor.fetchone()
-    if row:
-        return row[0]
-    else:
-        cursor.execute("INSERT INTO diggers_count (id, count) VALUES (%s, %s);", (DIGGERS_ID, 0))
-        conn.commit()
-        return 0
-
-
-def save_diggers_count(new_count):
-    cursor.execute("""
-        INSERT INTO diggers_count (id, count)
-        VALUES (%s, %s)
-        ON CONFLICT (id)
-        DO UPDATE SET count = EXCLUDED.count;
-    """, (DIGGERS_ID, new_count))
-    conn.commit()
+from Code.Database import load_diggers_count, save_diggers_count
 
 # --- Main App ---
 def main():
