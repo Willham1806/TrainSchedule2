@@ -1,59 +1,58 @@
 import streamlit as st
 from datetime import date
-import psycopg2
-import os
-
-conn = psycopg2.connect(st.secrets["SUPABASE_URL"])
-cursor = conn.cursor()
+from Code.Database import get_db
 
 def load_notes_from_db(date_obj, keys):
+    db = get_db()
     date_str = date_obj.isoformat()
-    format_strings = ','.join(['%s'] * len(keys))
-    query = f"SELECT key, value FROM daily_notes WHERE date = %s AND key IN ({format_strings});"
-    cursor.execute(query, (date_str, *keys))
-    rows = cursor.fetchall()
-    return {key: value for key, value in rows}
-
+    doc = db.collection("daily_notes").document(date_str).get()
+    if doc.exists:
+        data = doc.to_dict()
+        return {k: data.get(k, "") for k in keys}
+    return {k: "" for k in keys}
 
 def save_notes_to_db(date_obj, notes_dict):
+    db = get_db()
     date_str = date_obj.isoformat()
-    # Delete existing notes for that date
-    cursor.execute("DELETE FROM daily_notes WHERE date = %s;", (date_str,))
-    # Insert new notes
-    insert_query = "INSERT INTO daily_notes (date, key, value) VALUES (%s, %s, %s);"
-    for k, v in notes_dict.items():
-        cursor.execute(insert_query, (date_str, k, v))
-    conn.commit()
-
+    db.collection("daily_notes").document(date_str).set(notes_dict)
 
 def delete_old_notes():
+    db = get_db()
     today_str = date.today().isoformat()
-    cursor.execute("DELETE FROM daily_notes WHERE date < %s;", (today_str,))
-    conn.commit()
-
+    docs = db.collection("daily_notes").stream()
+    for doc in docs:
+        if doc.id < today_str:
+            doc.reference.delete()
 
 def load_custom_questions():
-    cursor.execute("SELECT key, text FROM custom_questions;")
-    rows = cursor.fetchall()
-    return {key: text for key, text in rows}
-
+    db = get_db()
+    doc = db.collection("custom_questions").document("all").get()
+    if doc.exists:
+        return doc.to_dict()
+    return {}
 
 def save_custom_question(key, text):
-    cursor.execute("INSERT INTO custom_questions (key, text) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING;", (key, text))
-    conn.commit()
-
+    db = get_db()
+    doc_ref = db.collection("custom_questions").document("all")
+    doc = doc_ref.get()
+    data = doc.to_dict() if doc.exists else {}
+    data[key] = text
+    doc_ref.set(data)
 
 def delete_custom_question(key):
-    cursor.execute("DELETE FROM custom_questions WHERE key = %s;", (key,))
-    conn.commit()
+    db = get_db()
+    doc_ref = db.collection("custom_questions").document("all")
+    doc = doc_ref.get()
+    if doc.exists:
+        data = doc.to_dict()
+        data.pop(key, None)
+        doc_ref.set(data)
 
 def information_page():
-    # Auto-delete outdated notes
     delete_old_notes()
 
     st.title("🗓️ Information & Planning Page")
 
-    # Load all questions from DB (initial default ones + user-added)
     default_questions = {
         "in_charge": "In charge:",
         "first_aider": "First Aider:",
@@ -67,11 +66,9 @@ def information_page():
         "school_trains": "Schools and the time of their trains today:",
     }
 
-    # Load all questions from DB
     if "all_questions" not in st.session_state:
         db_questions = load_custom_questions()
         if not db_questions:
-            # If empty, save defaults to DB
             for key, text in default_questions.items():
                 save_custom_question(key, text)
             db_questions = default_questions
@@ -80,7 +77,6 @@ def information_page():
     questions = st.session_state["all_questions"]
     today_key = date.today().isoformat()
 
-    # --- Show today's notes (read-only) ---
     st.markdown("### 📅 Today's Notes")
     today_notes = load_notes_from_db(date.today(), list(questions.keys()))
 
@@ -98,9 +94,7 @@ def information_page():
 
     st.markdown("---")
 
-    # --- Edit notes for selected date ---
     st.header("📅 Plan for Another Date")
-
     selected_date = st.date_input("Select a date to plan for", value=date.today())
     date_key = selected_date.isoformat()
     notes_for_date = load_notes_from_db(selected_date, list(questions.keys()))
@@ -115,7 +109,6 @@ def information_page():
 
     st.markdown("---")
     st.subheader("➕ Add a New Question")
-
     new_question_text = st.text_input("Enter your new question here:")
     if st.button("Add Question"):
         if not new_question_text.strip():
@@ -129,7 +122,6 @@ def information_page():
 
     st.markdown("---")
     st.subheader("➖ Remove a Question")
-
     if questions:
         question_to_remove = st.selectbox(
             "Select a question to remove:",
